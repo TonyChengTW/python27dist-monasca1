@@ -1,3 +1,39 @@
+Metadata-Version: 2.0
+Name: monasca-api
+Version: 1.6.1
+Summary: OpenStack Monitoring as a Service
+Home-page: https://github.com/openstack/monasca-api
+Author: OpenStack
+Author-email: openstack-dev@lists.openstack.org
+License: UNKNOWN
+Platform: UNKNOWN
+Classifier: Environment :: OpenStack
+Classifier: Intended Audience :: Information Technology
+Classifier: Intended Audience :: System Administrators
+Classifier: License :: OSI Approved :: Apache Software License
+Classifier: Operating System :: POSIX :: Linux
+Classifier: Programming Language :: Python
+Classifier: Programming Language :: Python :: 2
+Classifier: Programming Language :: Python :: 2.7
+Requires-Dist: PasteDeploy (>=1.5.0)
+Requires-Dist: SQLAlchemy (<1.1.0,>=1.0.10)
+Requires-Dist: eventlet (!=0.18.3,>=0.18.2)
+Requires-Dist: falcon (>=0.1.6)
+Requires-Dist: keystonemiddleware (>=4.12.0)
+Requires-Dist: monasca-common (>=1.4.0)
+Requires-Dist: oslo.config (!=3.18.0,>=3.14.0)
+Requires-Dist: oslo.context (>=2.9.0)
+Requires-Dist: oslo.log (>=3.11.0)
+Requires-Dist: oslo.middleware (>=3.0.0)
+Requires-Dist: oslo.serialization (>=1.10.0)
+Requires-Dist: oslo.utils (>=3.18.0)
+Requires-Dist: pbr (>=1.8,<2.0.0)
+Requires-Dist: pyparsing (>=2.1.0)
+Requires-Dist: python-keystoneclient (>=3.8.0)
+Requires-Dist: simplejson (>=2.2.0)
+Requires-Dist: six (>=1.9.0)
+Requires-Dist: voluptuous (>=0.8.9)
+
 Team and repository tags
 ========================
 
@@ -103,6 +139,7 @@ located::
 
     /etc/monasca/api-config.ini
     /etc/monasca/api-config.conf
+    /etc/monasca/api-logging.conf
 
 Once the configurations are modified to match your environment, you can start
 up the server by following the following instructions.
@@ -123,8 +160,51 @@ from the root directory of this project
 To run all the unit test cases, run the following command from the root
 directory of this project
 
-    $ tox -e py27   (or -e py26, -e py33)
+    $ tox -e py27
 
+### Start the Server -- for Apache
+
+To start the server using Apache: create a modwsgi file,
+create a modwsgi configuration file, and enable the wsgi module
+in Apache.
+
+The modwsgi configuration file may look something like this, and the site will need to be enabled:
+
+```apache
+    Listen 8070
+
+    <VirtualHost *:8070>
+
+        WSGIDaemonProcess monasca-api processes=4 threads=1 socket-timeout=120 user=mon-api group=monasca python-path=/usr/local/lib/python2.7/site-packages
+        WSGIProcessGroup monasca-api
+        WSGIApplicationGroup monasca-api
+        WSGIScriptAlias / /usr/local/lib/python2.7/site-packages/monasca_log_api/api/wsgi/monasca_api.py
+
+        WSGIPassAuthorization On
+
+        LogLevel info
+        ErrorLog /var/log/monasca-api/wsgi.log
+        CustomLog /var/log/monasca-api/wsgi-access.log combined
+
+        <Directory /usr/local/lib/python2.7/site-packages/monasca_log_api>
+          Require all granted
+        </Directory>
+
+        SetEnv no-gzip 1
+
+    </VirtualHost>
+
+```
+
+The wsgi file may look something like this:
+
+```py
+
+    from monasca_log_api.api import server
+
+    application = server.get_wsgi_app(config_base_path='/etc/monasca')
+
+```
 
 # License
 

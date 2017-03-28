@@ -1,5 +1,5 @@
 # Copyright 2015 Cray Inc. All Rights Reserved.
-# (C) Copyright 2014,2016 Hewlett Packard Enterprise Development LP
+# (C) Copyright 2014,2016-2017 Hewlett Packard Enterprise Development LP
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -17,16 +17,14 @@ import datetime
 import json
 
 import falcon
+from monasca_common.validation import metrics as metric_validation
 from oslo_log import log
 from oslo_utils import timeutils
 import simplejson
+import six
 import six.moves.urllib.parse as urlparse
 
-from monasca_api.common.repositories import constants
 from monasca_api.v2.common.exceptions import HTTPUnprocessableEntityError
-from monasca_api.v2.common.schemas import dimensions_schema
-from monasca_api.v2.common.schemas import exceptions as schemas_exceptions
-from monasca_api.v2.common.schemas import metric_name_schema
 
 LOG = log.getLogger(__name__)
 
@@ -54,24 +52,6 @@ def validate_json_content_type(req):
                                                    'application/json')
 
 
-def is_in_role(req, authorized_roles):
-    """Is one or more of the X-ROLES in the supplied authorized_roles.
-
-    :param req: HTTP request object. Must contain "X-ROLES" in the HTTP
-    request header.
-    :param authorized_roles: List of authorized roles to check against.
-    :return: Returns True if in the list of authorized roles, otherwise False.
-    """
-    str_roles = req.get_header('X-ROLES')
-    if str_roles is None:
-        return False
-    roles = str_roles.lower().split(',')
-    for role in roles:
-        if role in authorized_roles:
-            return True
-    return False
-
-
 def validate_authorization(req, authorized_roles):
     """Validates whether one or more X-ROLES in the HTTP header is authorized.
 
@@ -85,29 +65,22 @@ def validate_authorization(req, authorized_roles):
     :param authorized_roles: List of authorized roles to check against.
     :raises falcon.HTTPUnauthorized
     """
-    str_roles = req.get_header('X-ROLES')
+    roles = req.roles
     challenge = 'Token'
-    if str_roles is None:
+    if not roles:
         raise falcon.HTTPUnauthorized('Forbidden',
                                       'Tenant does not have any roles',
                                       challenge)
-    roles = str_roles.lower().split(',')
+    roles = roles.split(',') if isinstance(roles, six.string_types) else roles
     authorized_roles_lower = [r.lower() for r in authorized_roles]
     for role in roles:
+        role = role.lower()
         if role in authorized_roles_lower:
             return
     raise falcon.HTTPUnauthorized('Forbidden',
                                   'Tenant ID is missing a required role to '
                                   'access this service',
                                   challenge)
-
-
-def get_tenant_id(req):
-    """Returns the tenant ID in the HTTP request header.
-
-    :param req: HTTP request object.
-    """
-    return req.get_header('X-TENANT-ID')
 
 
 def get_x_tenant_or_tenant_id(req, delegate_authorized_roles):
@@ -118,12 +91,12 @@ def get_x_tenant_or_tenant_id(req, delegate_authorized_roles):
     delegate privileges.
     :returns: Returns the cross tenant or tenant ID.
     """
-    if is_in_role(req, delegate_authorized_roles):
+    if any(x in set(delegate_authorized_roles) for x in req.roles):
         params = falcon.uri.parse_query_string(req.query_string)
         if 'tenant_id' in params:
             tenant_id = params['tenant_id']
             return tenant_id
-    return get_tenant_id(req)
+    return req.project_id
 
 
 def get_query_param(req, param_name, required=False, default_val=None):
@@ -166,37 +139,36 @@ def get_query_name(req, name_required=False):
         raise HTTPUnprocessableEntityError('Unprocessable Entity', ex.message)
 
 
-def get_query_dimensions(req):
+def get_query_dimensions(req, param_key='dimensions'):
     """Gets and parses the query param dimensions.
 
     :param req: HTTP request object.
+    :param dimensions_param: param name for dimensions, default='dimensions'
     :return: Returns the dimensions as a JSON object
     :raises falcon.HTTPBadRequest: If dimensions are malformed.
     """
     try:
         params = falcon.uri.parse_query_string(req.query_string)
         dimensions = {}
-        if 'dimensions' in params:
-            dimensions_param = params['dimensions']
+        if param_key not in params:
+            return dimensions
 
-            if isinstance(dimensions_param, basestring):
-                dimensions_str_array = dimensions_param.split(',')
-            elif isinstance(dimensions_param, list):
-                dimensions_str_array = []
-                for sublist in dimensions_param:
-                    dimensions_str_array.extend(sublist.split(","))
-            else:
-                raise Exception("Error parsing dimensions, unknown format")
+        dimensions_param = params[param_key]
+        if isinstance(dimensions_param, basestring):
+            dimensions_str_array = dimensions_param.split(',')
+        elif isinstance(dimensions_param, list):
+            dimensions_str_array = []
+            for sublist in dimensions_param:
+                dimensions_str_array.extend(sublist.split(","))
+        else:
+            raise Exception("Error parsing dimensions, unknown format")
 
-            for dimension in dimensions_str_array:
-                dimension_name_value = dimension.split(':')
-                if len(dimension_name_value) == 2:
-                    dimensions[dimension_name_value[0]] = dimension_name_value[
-                        1]
-                elif len(dimension_name_value) == 1:
-                    dimensions[dimension_name_value[0]] = ""
-                else:
-                    raise Exception('Dimensions are malformed')
+        for dimension in dimensions_str_array:
+            dimension_name_value = dimension.split(':', 1)
+            if len(dimension_name_value) == 2:
+                dimensions[dimension_name_value[0]] = dimension_name_value[1]
+            elif len(dimension_name_value) == 1:
+                dimensions[dimension_name_value[0]] = ""
         return dimensions
     except Exception as ex:
         LOG.debug(ex)
@@ -309,9 +281,11 @@ def validate_query_name(name):
     :param name: Query param name.
     :raises falcon.HTTPBadRequest: If name is not valid.
     """
+    if not name:
+        return
     try:
-        metric_name_schema.validate(name)
-    except schemas_exceptions.ValidationException as ex:
+        metric_validation.validate_name(name)
+    except Exception as ex:
         LOG.debug(ex)
         raise HTTPUnprocessableEntityError('Unprocessable Entity', ex.message)
 
@@ -323,8 +297,19 @@ def validate_query_dimensions(dimensions):
     :raises falcon.HTTPBadRequest: If dimensions are not valid.
     """
     try:
-        dimensions_schema.validate(dimensions)
-    except schemas_exceptions.ValidationException as ex:
+
+        for key, value in dimensions.items():
+            if key.startswith('_'):
+                raise Exception("Dimension key {} may not start with '_'".format(key))
+            metric_validation.validate_dimension_key(key)
+            if value:
+                if '|' in value:
+                    values = value.split('|')
+                    for v in values:
+                        metric_validation.validate_dimension_value(key, v)
+                else:
+                    metric_validation.validate_dimension_value(key, value)
+    except Exception as ex:
         LOG.debug(ex)
         raise HTTPUnprocessableEntityError('Unprocessable Entity', ex.message)
 
@@ -769,21 +754,3 @@ def dumpit_utf8(thingy):
 
 def str_2_bool(s):
     return s.lower() in ("true")
-
-
-def get_limit(req):
-    limit = get_query_param(req, 'limit')
-
-    if limit:
-        if limit.isdigit():
-            limit = int(limit)
-            if limit > constants.PAGE_LIMIT:
-                return constants.PAGE_LIMIT
-            else:
-                return limit
-        else:
-            raise HTTPUnprocessableEntityError("Invalid limit",
-                                               "Limit parameter must "
-                                               "be a positive integer")
-    else:
-        return constants.PAGE_LIMIT

@@ -1,10 +1,10 @@
-# Copyright 2014 Hewlett-Packard
+# Copyright 2017 FUJITSU LIMITED
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
 # a copy of the License at
 #
-# http://www.apache.org/licenses/LICENSE-2.0
+#      http://www.apache.org/licenses/LICENSE-2.0
 #
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
@@ -12,20 +12,9 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-from oslo_log import log
-import voluptuous
+# extremely simple way to setup of monasca-api
+# with wsgi
 
-from monasca_api.v2.common.schemas import exceptions
+from monasca_api.api import server
 
-LOG = log.getLogger(__name__)
-
-metric_name_schema = voluptuous.Schema(
-    voluptuous.All(voluptuous.Any(str, unicode), voluptuous.Length(max=64)))
-
-
-def validate(name):
-    try:
-        metric_name_schema(name)
-    except Exception as ex:
-        LOG.debug(ex)
-        raise exceptions.ValidationException(str(ex))
+application = server.get_wsgi_app(config_base_path='/etc/monasca')

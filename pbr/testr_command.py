@@ -56,9 +56,7 @@ class TestrReal(cmd.Command):
          "from each testr worker."),
         ('testr-args=', 't', "Run 'testr' with these args"),
         ('omit=', 'o', "Files to omit from coverage calculations"),
-        ('coverage-package-name=', None, "Use this name to select packages "
-                                         "for coverage (one or more, "
-                                         "comma-separated)"),
+        ('coverage-package-name=', None, "Use this name for coverage package"),
         ('slowest', None, "Show slowest test times after tests complete."),
         ('no-parallel', None, "Run testr serially"),
         ('log-level=', 'l', "Log level (default: info)"),

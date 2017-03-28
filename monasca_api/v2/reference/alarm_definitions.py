@@ -1,4 +1,4 @@
-# (C) Copyright 2014,2016 Hewlett Packard Enterprise Development Company LP
+# (C) Copyright 2014-2017 Hewlett Packard Enterprise Development LP
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -16,6 +16,7 @@ import re
 
 import falcon
 from monasca_common.simport import simport
+from monasca_common.validation import metrics as metric_validation
 from oslo_config import cfg
 from oslo_log import log
 import pyparsing
@@ -53,6 +54,7 @@ class AlarmDefinitions(alarm_definitions_api_v2.AlarmDefinitionsV2API,
             LOG.exception(ex)
             raise exceptions.RepositoryException(ex)
 
+    @resource.resource_try_catch_block
     def on_post(self, req, res):
         helpers.validate_authorization(req, self._default_authorized_roles)
 
@@ -60,7 +62,6 @@ class AlarmDefinitions(alarm_definitions_api_v2.AlarmDefinitionsV2API,
 
         self._validate_alarm_definition(alarm_definition)
 
-        tenant_id = helpers.get_tenant_id(req)
         name = get_query_alarm_definition_name(alarm_definition)
         expression = get_query_alarm_definition_expression(alarm_definition)
         description = get_query_alarm_definition_description(alarm_definition)
@@ -72,7 +73,7 @@ class AlarmDefinitions(alarm_definitions_api_v2.AlarmDefinitionsV2API,
             alarm_definition)
         ok_actions = get_query_ok_actions(alarm_definition)
 
-        result = self._alarm_definition_create(tenant_id, name, expression,
+        result = self._alarm_definition_create(req.project_id, name, expression,
                                                description, severity, match_by,
                                                alarm_actions,
                                                undetermined_actions,
@@ -82,15 +83,16 @@ class AlarmDefinitions(alarm_definitions_api_v2.AlarmDefinitionsV2API,
         res.body = helpers.dumpit_utf8(result)
         res.status = falcon.HTTP_201
 
+    @resource.resource_try_catch_block
     def on_get(self, req, res, alarm_definition_id=None):
         if alarm_definition_id is None:
             helpers.validate_authorization(req, self._get_alarmdefs_authorized_roles)
-            tenant_id = helpers.get_tenant_id(req)
             name = helpers.get_query_name(req)
             dimensions = helpers.get_query_dimensions(req)
             severity = helpers.get_query_param(req, "severity", default_val=None)
             if severity is not None:
                 validation.validate_severity_query(severity)
+                severity = severity.upper()
             sort_by = helpers.get_query_param(req, 'sort_by', default_val=None)
             if sort_by is not None:
                 if isinstance(sort_by, basestring):
@@ -108,19 +110,18 @@ class AlarmDefinitions(alarm_definitions_api_v2.AlarmDefinitionsV2API,
                 except Exception:
                     raise HTTPUnprocessableEntityError('Unprocessable Entity',
                                                        'Offset value {} must be an integer'.format(offset))
-            limit = helpers.get_limit(req)
-
-            result = self._alarm_definition_list(tenant_id, name, dimensions, severity,
-                                                 req.uri, sort_by, offset, limit)
+            result = self._alarm_definition_list(req.project_id, name,
+                                                 dimensions, severity,
+                                                 req.uri, sort_by,
+                                                 offset, req.limit)
 
             res.body = helpers.dumpit_utf8(result)
             res.status = falcon.HTTP_200
 
         else:
             helpers.validate_authorization(req, self._get_alarmdefs_authorized_roles)
-            tenant_id = helpers.get_tenant_id(req)
 
-            result = self._alarm_definition_show(tenant_id,
+            result = self._alarm_definition_show(req.project_id,
                                                  alarm_definition_id)
 
             helpers.add_links_to_resource(result,
@@ -129,6 +130,7 @@ class AlarmDefinitions(alarm_definitions_api_v2.AlarmDefinitionsV2API,
             res.body = helpers.dumpit_utf8(result)
             res.status = falcon.HTTP_200
 
+    @resource.resource_try_catch_block
     def on_put(self, req, res, alarm_definition_id):
 
         helpers.validate_authorization(req, self._default_authorized_roles)
@@ -136,8 +138,6 @@ class AlarmDefinitions(alarm_definitions_api_v2.AlarmDefinitionsV2API,
         alarm_definition = helpers.read_json_msg_body(req)
 
         self._validate_alarm_definition(alarm_definition, require_all=True)
-
-        tenant_id = helpers.get_tenant_id(req)
 
         name = get_query_alarm_definition_name(alarm_definition)
         expression = get_query_alarm_definition_expression(alarm_definition)
@@ -151,7 +151,7 @@ class AlarmDefinitions(alarm_definitions_api_v2.AlarmDefinitionsV2API,
         match_by = get_query_alarm_definition_match_by(alarm_definition)
         severity = get_query_alarm_definition_severity(alarm_definition)
 
-        result = self._alarm_definition_update_or_patch(tenant_id,
+        result = self._alarm_definition_update_or_patch(req.project_id,
                                                         alarm_definition_id,
                                                         name,
                                                         expression,
@@ -168,13 +168,12 @@ class AlarmDefinitions(alarm_definitions_api_v2.AlarmDefinitionsV2API,
         res.body = helpers.dumpit_utf8(result)
         res.status = falcon.HTTP_200
 
+    @resource.resource_try_catch_block
     def on_patch(self, req, res, alarm_definition_id):
 
         helpers.validate_authorization(req, self._default_authorized_roles)
 
         alarm_definition = helpers.read_json_msg_body(req)
-
-        tenant_id = helpers.get_tenant_id(req)
 
         # Optional args
         name = get_query_alarm_definition_name(alarm_definition,
@@ -197,7 +196,7 @@ class AlarmDefinitions(alarm_definitions_api_v2.AlarmDefinitionsV2API,
         severity = get_query_alarm_definition_severity(alarm_definition,
                                                        return_none=True)
 
-        result = self._alarm_definition_update_or_patch(tenant_id,
+        result = self._alarm_definition_update_or_patch(req.project_id,
                                                         alarm_definition_id,
                                                         name,
                                                         expression,
@@ -214,11 +213,11 @@ class AlarmDefinitions(alarm_definitions_api_v2.AlarmDefinitionsV2API,
         res.body = helpers.dumpit_utf8(result)
         res.status = falcon.HTTP_200
 
+    @resource.resource_try_catch_block
     def on_delete(self, req, res, alarm_definition_id):
 
         helpers.validate_authorization(req, self._default_authorized_roles)
-        tenant_id = helpers.get_tenant_id(req)
-        self._alarm_definition_delete(tenant_id, alarm_definition_id)
+        self._alarm_definition_delete(req.project_id, alarm_definition_id)
         res.status = falcon.HTTP_204
 
     def _validate_name_not_conflicting(self, tenant_id, name, expected_id=None):
@@ -243,7 +242,6 @@ class AlarmDefinitions(alarm_definitions_api_v2.AlarmDefinitionsV2API,
                     "An alarm definition with the name {} already exists with id {}"
                     .format(name, found_definition_id))
 
-    @resource.resource_try_catch_block
     def _alarm_definition_show(self, tenant_id, id):
 
         alarm_definition_row = (
@@ -265,7 +263,7 @@ class AlarmDefinitions(alarm_definitions_api_v2.AlarmDefinitionsV2API,
         undetermined_actions_list = get_comma_separated_str_as_list(
             alarm_definition_row['undetermined_actions'])
 
-        description = (alarm_definition_row['description'].decode('utf8')
+        description = (alarm_definition_row['description']
                        if alarm_definition_row['description'] is not None else None)
 
         expression = alarm_definition_row['expression'].decode('utf8')
@@ -287,7 +285,6 @@ class AlarmDefinitions(alarm_definitions_api_v2.AlarmDefinitionsV2API,
 
         return result
 
-    @resource.resource_try_catch_block
     def _alarm_definition_delete(self, tenant_id, id):
 
         sub_alarm_definition_rows = (
@@ -307,7 +304,6 @@ class AlarmDefinitions(alarm_definitions_api_v2.AlarmDefinitionsV2API,
         self._send_alarm_event(u'alarm-deleted', tenant_id, id,
                                alarm_metric_rows, sub_alarm_rows, None, None)
 
-    @resource.resource_try_catch_block
     def _alarm_definition_list(self, tenant_id, name, dimensions, severity, req_uri, sort_by,
                                offset, limit):
 
@@ -359,13 +355,12 @@ class AlarmDefinitions(alarm_definitions_api_v2.AlarmDefinitionsV2API,
             schema_alarms.validate(alarm_definition, require_all=require_all)
             if 'match_by' in alarm_definition:
                 for name in alarm_definition['match_by']:
-                    validation.dimension_key(name)
+                    metric_validation.validate_dimension_key(name)
 
         except Exception as ex:
             LOG.debug(ex)
             raise HTTPUnprocessableEntityError('Unprocessable Entity', ex.message)
 
-    @resource.resource_try_catch_block
     def _alarm_definition_update_or_patch(self, tenant_id,
                                           definition_id,
                                           name,
@@ -385,11 +380,13 @@ class AlarmDefinitions(alarm_definitions_api_v2.AlarmDefinitionsV2API,
                     monasca_api.expression_parser.alarm_expr_parser.
                     AlarmExprParser(expression).sub_expr_list)
 
-            except pyparsing.ParseException as ex:
+            except (pyparsing.ParseException,
+                    pyparsing.ParseFatalException) as ex:
                 LOG.exception(ex)
                 title = "Invalid alarm expression".encode('utf8')
-                msg = "parser failed on expression '{}' at column {}".format(
-                    expression.encode('utf8'), str(ex.column).encode('utf8'))
+                msg = "parser failed on expression '{}' at column {}: {}".format(
+                      expression.encode('utf8'), str(ex.column).encode('utf8'),
+                      ex.msg.encode('utf8'))
                 raise HTTPUnprocessableEntityError(title, msg)
         else:
             sub_expr_list = None
@@ -429,15 +426,20 @@ class AlarmDefinitions(alarm_definitions_api_v2.AlarmDefinitionsV2API,
             self._build_sub_alarm_def_update_dict(sub_alarm_def_dicts[
                 'unchanged']))
 
+        result = self._build_alarm_definition_show_result(alarm_def_row)
+        # Not all of the passed in parameters will be set if this called
+        # from on_patch vs on_update. The alarm-definition-updated event
+        # MUST have all of the fields set so use the dict built from the
+        # data returned from the database
         alarm_def_event_dict = (
             {u'tenantId': tenant_id,
              u'alarmDefinitionId': definition_id,
-             u'alarmName': name,
-             u'alarmDescription': description,
-             u'alarmExpression': expression,
-             u'severity': severity,
-             u'matchBy': match_by,
-             u'alarmActionsEnabled': actions_enabled,
+             u'alarmName': result['name'],
+             u'alarmDescription': result['description'],
+             u'alarmExpression': result['expression'],
+             u'severity': result['severity'],
+             u'matchBy': result['match_by'],
+             u'alarmActionsEnabled': result['actions_enabled'],
              u'oldAlarmSubExpressions': old_sub_alarm_def_event_dict,
              u'changedSubExpressions': changed_sub_alarm_def_event_dict,
              u'unchangedSubExpressions': unchanged_sub_alarm_def_event_dict,
@@ -448,8 +450,6 @@ class AlarmDefinitions(alarm_definitions_api_v2.AlarmDefinitionsV2API,
 
         self.send_event(self.events_message_queue,
                         alarm_definition_updated_event)
-
-        result = self._build_alarm_definition_show_result(alarm_def_row)
 
         return result
 
@@ -480,7 +480,6 @@ class AlarmDefinitions(alarm_definitions_api_v2.AlarmDefinitionsV2API,
 
         return sub_alarm_def_update_dict
 
-    @resource.resource_try_catch_block
     def _alarm_definition_create(self, tenant_id, name, expression,
                                  description, severity, match_by,
                                  alarm_actions, undetermined_actions,
@@ -491,11 +490,13 @@ class AlarmDefinitions(alarm_definitions_api_v2.AlarmDefinitionsV2API,
                 monasca_api.expression_parser.alarm_expr_parser.
                 AlarmExprParser(expression).sub_expr_list)
 
-        except pyparsing.ParseException as ex:
+        except (pyparsing.ParseException,
+                pyparsing.ParseFatalException) as ex:
             LOG.exception(ex)
             title = "Invalid alarm expression".encode('utf8')
-            msg = "parser failed on expression '{}' at column {}".format(
-                expression.encode('utf8'), str(ex.column).encode('utf8'))
+            msg = "parser failed on expression '{}' at column {}: {}".format(
+                  expression.encode('utf8'), str(ex.column).encode('utf8'),
+                  ex.msg.encode('utf8'))
             raise HTTPUnprocessableEntityError(title, msg)
 
         self._validate_name_not_conflicting(tenant_id, name)
@@ -628,7 +629,7 @@ def get_query_alarm_definition_expression(alarm_definition,
 def get_query_alarm_definition_description(alarm_definition,
                                            return_none=False):
     if 'description' in alarm_definition:
-        return alarm_definition['description']
+        return alarm_definition['description'].decode('utf8')
     else:
         if return_none:
             return None

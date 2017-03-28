@@ -1,4 +1,4 @@
-# (C) Copyright 2016 Hewlett Packard Enterprise Development Company LP
+# (C) Copyright 2016-2017 Hewlett Packard Enterprise Development LP
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -13,17 +13,19 @@
 # under the License.
 
 import time
+import urllib
 
 from monasca_tempest_tests.tests.api import base
 from monasca_tempest_tests.tests.api import helpers
 from tempest.common.utils import data_utils
-from tempest import test
 from tempest.lib import exceptions
+from tempest import test
 
 
 GROUP_BY_ALLOWED_PARAMS = {'alarm_definition_id', 'name', 'state', 'severity',
                            'link', 'lifecycle_state', 'metric_name',
                            'dimension_name', 'dimension_value'}
+
 
 class TestAlarmsCount(base.BaseMonascaTest):
 
@@ -155,7 +157,6 @@ class TestAlarmsCount(base.BaseMonascaTest):
         msg = "Failed to create all specified alarms during setup, alarm_count was {}".format(alarm_count)
         assert False, msg
 
-
     @classmethod
     def resource_cleanup(cls):
         for definition_id in cls.alarm_definition_ids:
@@ -194,7 +195,7 @@ class TestAlarmsCount(base.BaseMonascaTest):
         resp, response_body = self.monasca_client.list_alarms("?state=ALARM")
         self.assertEqual(200, resp.status)
         alarm_state_count = len(response_body['elements'])
-        resp, response_body = self.monasca_client.list_alarms("?state=UNDETERMINED")
+        resp, response_body = self.monasca_client.list_alarms("?state=undetermined")
         self.assertEqual(200, resp.status)
         undet_state_count = len(response_body['elements'])
 
@@ -227,34 +228,46 @@ class TestAlarmsCount(base.BaseMonascaTest):
             if alarm['state'] is 'ALARM' and alarm['severity'] is 'LOW':
                 alarm_low_count += 1
 
-
-        resp, response_body = self.monasca_client.count_alarms("?group_by=state,severity")
+        # Using urlencode mimics the CLI behavior. Without the urlencode, falcon
+        # treats group_by as a list, with the urlencode it treats group_by as
+        # a string. The API needs to handle both.
+        # test_with_all_group_by_params tests multiple group_by without
+        # urlencode
+        query_params = urllib.urlencode([('group_by', 'state,severity')])
+        resp, response_body = self.monasca_client.count_alarms("?" + query_params)
         self._verify_counts_format(response_body, group_by=['state', 'severity'])
 
-
-    # test with filter parameters
-    @test.attr(type='gate')
-    def test_filter_params(self):
-        resp, response_body = self.monasca_client.list_alarms("?severity=LOW")
+    def run_count_test(self, query_string):
+        resp, response_body = self.monasca_client.list_alarms(query_string)
         self.assertEqual(200, resp.status)
         expected_count = len(response_body['elements'])
+        # Make sure something was found
+        self.assertTrue(expected_count > 0)
 
-        resp, response_body = self.monasca_client.count_alarms("?severity=LOW")
+        resp, response_body = self.monasca_client.count_alarms(query_string)
         self.assertEqual(200, resp.status)
         self._verify_counts_format(response_body, expected_length=1)
         self.assertEqual(expected_count, response_body['counts'][0][0])
+
+    # test filter by severity
+    @test.attr(type='gate')
+    def test_filter_severity(self):
+        self.run_count_test("?severity=LOW")
+
+    # test filter by state
+    @test.attr(type='gate')
+    def test_filter_state(self):
+        self.run_count_test("?state=ALARM")
+
+    # test filter by metric name
+    @test.attr(type='gate')
+    def test_filter_metric_name(self):
+        self.run_count_test("?metric_name=test_metric_01")
 
     # test with multiple metric dimensions
     @test.attr(type='gate')
     def test_filter_multiple_dimensions(self):
-        resp, response_body = self.monasca_client.list_alarms("?metric_dimensions=hostname:test_1,unique:1")
-        self.assertEqual(200, resp.status)
-        expected_count = len(response_body['elements'])
-
-        resp, response_body = self.monasca_client.count_alarms("?metric_dimensions=hostname:test_1,unique:1")
-        self.assertEqual(200, resp.status)
-        self._verify_counts_format(response_body, expected_length=1)
-        self.assertEqual(expected_count, response_body['counts'][0][0])
+        self.run_count_test("?metric_dimensions=hostname:test_1,unique:1")
 
     # test with filter and group_by parameters
     @test.attr(type='gate')
@@ -302,8 +315,6 @@ class TestAlarmsCount(base.BaseMonascaTest):
         self._verify_counts_format(response_body,
                                    group_by=['metric_name', 'dimension_name', 'dimension_value'],
                                    expected_length=1)
-
-
 
     @test.attr(type='gate')
     def test_offset(self):

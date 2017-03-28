@@ -1,4 +1,4 @@
-# (C) Copyright 2015-2016 Hewlett Packard Enterprise Development LP
+# (C) Copyright 2015-2017 Hewlett Packard Enterprise Development LP
 # Copyright 2015 Cray Inc. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -18,6 +18,7 @@ import unittest
 import falcon
 import mock
 
+import monasca_api.v2.common.exceptions as common_exceptions
 import monasca_api.v2.common.schemas.alarm_definition_request_body_schema as schemas_alarm_defs
 import monasca_api.v2.common.schemas.exceptions as schemas_exceptions
 import monasca_api.v2.common.schemas.notifications_request_body_schema as schemas_notifications
@@ -25,146 +26,79 @@ import monasca_api.v2.common.validation as validation
 import monasca_api.v2.reference.helpers as helpers
 
 
-invalid_chars = "<>={}(),\"\\|;&"
+class TestStateValidation(unittest.TestCase):
+
+    VALID_STATES = "OK", "ALARM", "UNDETERMINED"
+
+    def test_valid_states(self):
+        for state in self.VALID_STATES:
+            validation.validate_alarm_state(state)
+
+    def test_valid_states_lower_case(self):
+        for state in self.VALID_STATES:
+            validation.validate_alarm_state(state.lower())
+
+    def test_invalid_state(self):
+        self.assertRaises(common_exceptions.HTTPUnprocessableEntityError,
+                          validation.validate_alarm_state, 'BOGUS')
 
 
-class TestMetricNameValidation(unittest.TestCase):
-    def test_valid_name(self):
-        metric_name = "this.is_a.valid-name"
-        validation.metric_name(metric_name)
-        self.assertTrue(True)
+class TestSeverityValidation(unittest.TestCase):
 
-    def test_nonstring_name(self):
-        metric_name = 123456789
-        self.assertRaises(AssertionError, validation.metric_name, metric_name)
+    VALID_SEVERITIES = "LOW", "MEDIUM", "HIGH", "CRITICAL"
 
-    def test_long_name(self):
-        metric_name = ("abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz"
-                       "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz"
-                       "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz"
-                       "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz")
-        self.assertRaises(AssertionError, validation.metric_name, metric_name)
+    def test_valid_severities(self):
+        for state in self.VALID_SEVERITIES:
+            validation.validate_severity_query(state)
 
-    def test_invalid_chars(self):
-        for c in invalid_chars:
-            metric_name = "this{}that".format(c)
-            self.assertRaises(AssertionError, validation.metric_name, metric_name)
+    def test_valid_severities_lower_case(self):
+        for state in self.VALID_SEVERITIES:
+            validation.validate_severity_query(state.lower())
 
+    def test_valid_multi_severities(self):
+        validation.validate_severity_query('|'.join(self.VALID_SEVERITIES))
 
-class TestDimensionValidation(unittest.TestCase):
-    def test_valid_key(self):
-        dim_key = "this.is_a.valid-key"
-        validation.dimension_key(dim_key)
-        self.assertTrue(True)
+    def test_valid_multi_severities_lower_case(self):
+        validation.validate_severity_query('|'.join(self.VALID_SEVERITIES)
+                                           .lower())
 
-    def test_nonstring_key(self):
-        dim_key = 123456
-        self.assertRaises(AssertionError, validation.dimension_key, dim_key)
-
-    def test_long_key(self):
-        dim_key = ("abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz"
-                   "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz"
-                   "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz"
-                   "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz")
-        self.assertRaises(AssertionError, validation.dimension_key, dim_key)
-
-    def test_key_starts_with_underscore(self):
-        dim_key = '_key'
-        self.assertRaises(AssertionError, validation.dimension_key, dim_key)
-
-    def test_invalid_chars_key(self):
-        for c in invalid_chars:
-            dim_key = "this{}that".format(c)
-            self.assertRaises(AssertionError, validation.dimension_key, dim_key)
-
-    def test_valid_value(self):
-        dim_value = "this.is_a.valid-value"
-        validation.dimension_value(dim_value)
-        self.assertTrue(True)
-
-    def test_nonstring_value(self):
-        dim_value = None
-        self.assertRaises(AssertionError, validation.dimension_value, dim_value)
-
-    def test_long_value(self):
-        dim_value = ("abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz"
-                     "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz"
-                     "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz"
-                     "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz")
-        self.assertRaises(AssertionError, validation.dimension_value, dim_value)
-
-    def test_invalid_chars_value(self):
-        for c in invalid_chars:
-            dim_value = "this{}that".format(c)
-            self.assertRaises(AssertionError, validation.dimension_value, dim_value)
-
-
-class TestValueMetaValidation(unittest.TestCase):
-    def test_valid_name(self):
-        value_meta_name = "this.is_a.valid-name"
-        value_meta = {value_meta_name: 'value_meta_value'}
-        validation.validate_value_meta(value_meta)
-        self.assertTrue(True)
-
-    def test_nonstring_name(self):
-        value_meta_name = 123456
-        value_meta = {value_meta_name: 'value_meta_value'}
-        self.assertRaises(AssertionError, validation.validate_value_meta,
-                          value_meta)
-
-    def test_long_name(self):
-        value_meta_name = "x" * 256
-        value_meta = {value_meta_name: 'value_meta_value'}
-        self.assertRaises(AssertionError, validation.validate_value_meta,
-                          value_meta)
-
-    def test_valid_value(self):
-        value_meta_value = "this.is_a.valid-value"
-        value_meta = {'value_meta_name': value_meta_value}
-        validation.validate_value_meta(value_meta)
-        self.assertTrue(True)
-
-    def test_nonstring_value(self):
-        value_meta_value = 123456
-        value_meta = {'value_meta_name': value_meta_value}
-        self.assertRaises(AssertionError, validation.validate_value_meta,
-                          value_meta)
-
-    def test_long_value_meta(self):
-        value_meta_value = "x" * 2048
-        value_meta = {'value_meta_name': value_meta_value}
-        self.assertRaises(AssertionError, validation.validate_value_meta,
-                          value_meta)
+    def test_invalid_state(self):
+        self.assertRaises(common_exceptions.HTTPUnprocessableEntityError,
+                          validation.validate_severity_query,
+                          'BOGUS')
+        self.assertRaises(common_exceptions.HTTPUnprocessableEntityError,
+                          validation.validate_severity_query,
+                          '|'.join([self.VALID_SEVERITIES[0], 'BOGUS']))
 
 
 class TestRoleValidation(unittest.TestCase):
 
     def test_role_valid(self):
-        req_roles = 'role0,rOlE1'
+        req_roles = 'role0', 'rOlE1'
         authorized_roles = ['RolE1', 'Role2']
 
         req = mock.Mock()
-        req.get_header.return_value = req_roles
+        req.roles = req_roles
 
         helpers.validate_authorization(req, authorized_roles)
 
     def test_role_invalid(self):
-        req_roles = 'role2 ,role3'
-        authorized_roles = ['role0', 'role1', 'role2']
+        req_roles = 'role2', 'role3'
+        authorized_roles = ['role0', 'role1']
 
         req = mock.Mock()
-        req.get_header.return_value = req_roles
+        req.roles = req_roles
 
         self.assertRaises(
             falcon.HTTPUnauthorized,
             helpers.validate_authorization, req, authorized_roles)
 
     def test_empty_role_header(self):
-        req_roles = ''
+        req_roles = []
         authorized_roles = ['Role1', 'Role2']
 
         req = mock.Mock()
-        req.get_header.return_value = req_roles
+        req.roles = req_roles
 
         self.assertRaises(
             falcon.HTTPUnauthorized,
@@ -175,7 +109,7 @@ class TestRoleValidation(unittest.TestCase):
         authorized_roles = ['Role1', 'Role2']
 
         req = mock.Mock()
-        req.get_header.return_value = req_roles
+        req.roles = req_roles
 
         self.assertRaises(
             falcon.HTTPUnauthorized,

@@ -1,4 +1,4 @@
-# (C) Copyright 2015-2016 Hewlett Packard Enterprise Development Company LP
+# (C) Copyright 2015-2017 Hewlett Packard Enterprise Development LP
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -20,8 +20,8 @@ from monasca_tempest_tests.tests.api import base
 from monasca_tempest_tests.tests.api import constants
 from monasca_tempest_tests.tests.api import helpers
 from tempest.common.utils import data_utils
-from tempest import test
 from tempest.lib import exceptions
+from tempest import test
 
 
 class TestAlarms(base.BaseMonascaTest):
@@ -133,7 +133,7 @@ class TestAlarms(base.BaseMonascaTest):
         self._wait_for_alarms(1, alarm_def_id)
 
         query_dimensions = [key + ':' + value for key, value in metric['dimensions'].items()]
-        query_parms="?metric_dimensions=" + ','.join(query_dimensions)
+        query_parms = "?metric_dimensions=" + ','.join(query_dimensions)
 
         resp, response_body = self.monasca_client.list_alarms(query_parms)
         self._verify_list_alarms_elements(resp, response_body,
@@ -192,7 +192,6 @@ class TestAlarms(base.BaseMonascaTest):
         self.assertIn(metric_2['dimensions'], dimension_sets)
         self.assertNotIn(metric_3['dimensions'], dimension_sets)
 
-
     @test.attr(type="gate")
     def test_list_alarms_by_metric_dimensions_multi_value(self):
         metric_name = data_utils.rand_name('metric')
@@ -238,7 +237,6 @@ class TestAlarms(base.BaseMonascaTest):
         self.assertIn(metric_2['dimensions'], dimension_sets)
         self.assertNotIn(metric_3['dimensions'], dimension_sets)
 
-
     @test.attr(type="gate")
     def test_list_alarms_by_state(self):
         helpers.delete_alarm_definitions(self.monasca_client)
@@ -252,7 +250,7 @@ class TestAlarms(base.BaseMonascaTest):
         resp, response_body1 = self.monasca_client.list_alarms(query_parms)
         len1 = len(response_body1['elements'])
         self.assertEqual(200, resp.status)
-        query_parms = '?state=OK'
+        query_parms = '?state=ok'
         resp, response_body2 = self.monasca_client.list_alarms(query_parms)
         len2 = len(response_body2['elements'])
         self.assertEqual(200, resp.status)
@@ -721,6 +719,27 @@ class TestAlarms(base.BaseMonascaTest):
         id = data_utils.rand_name()
         self.assertRaises(exceptions.NotFound,
                           self.monasca_client.delete_alarm, id)
+
+    @test.attr(type="gate")
+    @test.attr(type=['negative'])
+    def test_patch_alarm_with_invalid_id(self):
+        id = data_utils.rand_name()
+        self.assertRaises(exceptions.NotFound,
+                          self.monasca_client.patch_alarm, id=id,
+                          lifecycle_state="OPEN")
+
+    @test.attr(type="gate")
+    @test.attr(type=['negative'])
+    def test_update_alarm_with_invalid_id(self):
+        alarm_id = data_utils.rand_name()
+        updated_state = "ALARM"
+        updated_lifecycle_state = "OPEN"
+        updated_link = "http://somesite.com"
+        self.assertRaises(exceptions.NotFound,
+                          self.monasca_client.update_alarm,
+                          id=alarm_id, state=updated_state,
+                          lifecycle_state=updated_lifecycle_state,
+                          link=updated_link)
 
     @test.attr(type="gate")
     def test_create_alarms_with_match_by(self):

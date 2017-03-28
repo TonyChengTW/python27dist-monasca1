@@ -13,10 +13,10 @@
 # under the License.
 
 import six.moves.urllib.parse as urlparse
-from tempest import config
 from tempest.common import credentials_factory
-import tempest.test
+from tempest import config
 from tempest.lib import exceptions
+import tempest.test
 
 from monasca_tempest_tests import clients
 
@@ -39,9 +39,10 @@ class BaseMonascaTest(tempest.test.BaseTestCase):
             force_tenant_isolation=True,
             identity_version=auth_version)
         credentials = cls.cred_provider.get_creds_by_roles(
-            ['monasca-user', 'anotherrole']).credentials
+            ['monasca-user', 'anotherrole', 'admin']).credentials
         cls.os = clients.Manager(credentials=credentials)
         cls.monasca_client = cls.os.monasca_client
+        cls.tenants_client = cls.os.tenants_client
 
     @staticmethod
     def cleanup_resources(method, list_of_ids):

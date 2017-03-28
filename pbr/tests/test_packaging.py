@@ -304,17 +304,6 @@ class TestPackagingInGitRepoWithCommit(base.BaseTestCase):
         self.expectThat(stdout, matchers.Contains('Generating ChangeLog'))
 
 
-class TestExtrafileInstallation(base.BaseTestCase):
-    def test_install_glob(self):
-        stdout, _, _ = self.run_setup(
-            'install', '--root', self.temp_dir + 'installed',
-            allow_fail=False)
-        self.expectThat(
-            stdout, matchers.Contains('copying data_files/a.txt'))
-        self.expectThat(
-            stdout, matchers.Contains('copying data_files/b.txt'))
-
-
 class TestPackagingInGitRepoWithoutCommit(base.BaseTestCase):
 
     def setUp(self):
@@ -326,13 +315,13 @@ class TestPackagingInGitRepoWithoutCommit(base.BaseTestCase):
         # No commits, no authors in list
         with open(os.path.join(self.package_dir, 'AUTHORS'), 'r') as f:
             body = f.read()
-        self.assertEqual('\n', body)
+        self.assertEqual(body, '\n')
 
     def test_changelog(self):
         # No commits, nothing should be in the ChangeLog list
         with open(os.path.join(self.package_dir, 'ChangeLog'), 'r') as f:
             body = f.read()
-        self.assertEqual('CHANGES\n=======\n\n', body)
+        self.assertEqual(body, 'CHANGES\n=======\n\n')
 
 
 class TestPackagingWheels(base.BaseTestCase):
@@ -474,7 +463,7 @@ class TestNestedRequirements(base.BaseTestCase):
         with open(nested, 'w') as f:
             f.write('pbr')
         result = packaging.parse_requirements([requirements])
-        self.assertEqual(['pbr'], result)
+        self.assertEqual(result, ['pbr'])
 
 
 class TestVersions(base.BaseTestCase):
@@ -749,11 +738,8 @@ def get_soabi():
     soabi = None
     try:
         soabi = sysconfig.get_config_var('SOABI')
-        arch = sysconfig.get_config_var('MULTIARCH')
     except IOError:
         pass
-    if soabi and arch and 'pypy' in sysconfig.get_scheme_names():
-        soabi = '%s-%s' % (soabi, arch)
     if soabi is None and 'pypy' in sysconfig.get_scheme_names():
         # NOTE(sigmavirus24): PyPy only added support for the SOABI config var
         # to sysconfig in 2015. That was well after 2.2.1 was published in the

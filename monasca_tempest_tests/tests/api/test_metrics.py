@@ -16,12 +16,15 @@
 # TODO(RMH): test_create_metric_no_value, should return 422 if value not sent
 import time
 
+from six.moves import range as xrange
+
+from tempest.common.utils import data_utils
+from tempest.lib import exceptions
+from tempest import test
+
 from monasca_tempest_tests.tests.api import base
 from monasca_tempest_tests.tests.api import constants
 from monasca_tempest_tests.tests.api import helpers
-from tempest.common.utils import data_utils
-from tempest import test
-from tempest.lib import exceptions
 
 
 class TestMetrics(base.BaseMonascaTest):
@@ -214,6 +217,42 @@ class TestMetrics(base.BaseMonascaTest):
                 self.fail(error_msg)
 
     @test.attr(type='gate')
+    def test_create_metric_with_colon_in_dimension_value(self):
+        name = data_utils.rand_name('name')
+        key = 'url'
+        value = 'http://localhost:8070/v2.0'
+        timestamp = int(round(time.time() * 1000))
+        time_iso = helpers.timestamp_to_iso(timestamp)
+        end_timestamp = int(round((time.time() + 3600 * 24) * 1000))
+        end_time_iso = helpers.timestamp_to_iso(end_timestamp)
+        metric = helpers.create_metric(name=name,
+                                       dimensions={key: value})
+        resp, response_body = self.monasca_client.create_metrics(metric)
+        self.assertEqual(204, resp.status)
+        query_param = '?name=' + name + '&start_time=' + time_iso + \
+                      '&end_time=' + end_time_iso + \
+                      '&dimensions=' + key + ':' + value
+        for i in xrange(constants.MAX_RETRIES):
+            resp, response_body = self.monasca_client. \
+                list_measurements(query_param)
+            self.assertEqual(200, resp.status)
+            elements = response_body['elements']
+            for element in elements:
+                if str(element['name']) == name:
+                    self._verify_list_measurements_element(element, key, value)
+                    measurement = element['measurements'][0]
+                    self._verify_list_measurements_measurement(
+                        measurement, metric, None, None)
+                    return
+            time.sleep(constants.RETRY_WAIT_SECS)
+            if i == constants.MAX_RETRIES - 1:
+                error_msg = "Failed test_create_metric: " \
+                            "timeout on waiting for metrics: at least " \
+                            "one metric is needed. Current number of " \
+                            "metrics = 0"
+                self.fail(error_msg)
+
+    @test.attr(type='gate')
     @test.attr(type=['negative'])
     def test_create_metric_with_no_timestamp(self):
         metric = helpers.create_metric()
@@ -286,11 +325,8 @@ class TestMetrics(base.BaseMonascaTest):
     @test.attr(type=['negative'])
     def test_create_metric_with_value_meta_name_exceeds_max_length(self):
         long_value_meta_name = "x" * (constants.MAX_VALUE_META_NAME_LENGTH + 1)
-        metric = helpers.create_metric(name='name',
-                                       value_meta=
-                                       {long_value_meta_name:
-                                            "value_meta_value"}
-                                       )
+        value_meta_dict = {long_value_meta_name: "value_meta_value"}
+        metric = helpers.create_metric(name='name', value_meta=value_meta_dict)
         self.assertRaises(exceptions.UnprocessableEntity,
                           self.monasca_client.create_metrics,
                           metric)
@@ -300,10 +336,8 @@ class TestMetrics(base.BaseMonascaTest):
     def test_create_metric_with_value_meta_exceeds_max_length(self):
         value_meta_name = "x"
         long_value_meta_value = "y" * constants.MAX_VALUE_META_TOTAL_LENGTH
-        metric = helpers.create_metric(name='name',
-                                       value_meta=
-                                       {value_meta_name: long_value_meta_value}
-                                       )
+        value_meta_dict = {value_meta_name: long_value_meta_value}
+        metric = helpers.create_metric(name='name', value_meta=value_meta_dict)
         self.assertRaises(exceptions.UnprocessableEntity,
                           self.monasca_client.create_metrics,
                           metric)
@@ -408,6 +442,38 @@ class TestMetrics(base.BaseMonascaTest):
             time.sleep(constants.RETRY_WAIT_SECS)
             if i == constants.MAX_RETRIES - 1:
                 error_msg = "Failed test_list_metrics_with_name: " \
+                            "timeout on waiting for metrics: at least " \
+                            "one metric is needed. Current number of " \
+                            "metrics = 0"
+                self.fail(error_msg)
+
+    @test.attr(type='gate')
+    def test_list_metrics_with_tenant(self):
+        name = data_utils.rand_name('name')
+        key = data_utils.rand_name('key')
+        value = data_utils.rand_name('value')
+        tenant = self.tenants_client.create_tenant(
+            name=data_utils.rand_name('test_tenant'))['tenant']
+        # Delete the tenant at the end of the test
+        self.addCleanup(self.tenants_client.delete_tenant, tenant['id'])
+        metric = helpers.create_metric(name=name,
+                                       dimensions={key: value})
+        resp, response_body = self.monasca_client.create_metrics(
+            metric, tenant_id=tenant['id'])
+        self.assertEqual(204, resp.status)
+        query_param = '?tenant_id=' + str(tenant['id'])
+        for i in xrange(constants.MAX_RETRIES):
+            resp, response_body = self.monasca_client.list_metrics(query_param)
+            self.assertEqual(200, resp.status)
+            elements = response_body['elements']
+            for element in elements:
+                if str(element['name']) == name:
+                    self._verify_list_metrics_element(element, test_key=key,
+                                                      test_value=value)
+                    return
+            time.sleep(constants.RETRY_WAIT_SECS)
+            if i == constants.MAX_RETRIES - 1:
+                error_msg = "Failed test_list_metrics_with_tenant: " \
                             "timeout on waiting for metrics: at least " \
                             "one metric is needed. Current number of " \
                             "metrics = 0"
